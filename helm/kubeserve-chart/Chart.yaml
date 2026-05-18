@@ -1,0 +1,14 @@
+apiVersion: v2
+name: kubeserve
+description: KubeServe — Kubernetes-native LLM inference autoscaling platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - llm
+  - kubernetes
+  - autoscaling
+  - keda
+  - inference
+maintainers:
+  - name: KubeServe Team

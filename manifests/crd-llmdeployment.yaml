@@ -1,0 +1,69 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: llmdeployments.kubeserve.io
+spec:
+  group: kubeserve.io
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - model
+                - provider
+              properties:
+                model:
+                  type: string
+                  description: "Model name (e.g. claude-3, gpt-4)"
+                provider:
+                  type: string
+                  description: "LLM provider (anthropic, openai, google)"
+                minReplicas:
+                  type: integer
+                  minimum: 0
+                  default: 1
+                  description: "Minimum pod count (0 enables scale-to-zero)"
+                maxReplicas:
+                  type: integer
+                  minimum: 1
+                  default: 10
+                  description: "Maximum pod count"
+                queueThreshold:
+                  type: integer
+                  minimum: 1
+                  default: 5
+                  description: "KEDA trigger: scale-up when queue length exceeds this value"
+                image:
+                  type: string
+                  description: "Override container image; defaults to provider mapping"
+                resources:
+                  type: object
+                  properties:
+                    cpuRequest:
+                      type: string
+                      default: "100m"
+                    memoryRequest:
+                      type: string
+                      default: "256Mi"
+                    cpuLimit:
+                      type: string
+                      default: "500m"
+                    memoryLimit:
+                      type: string
+                      default: "512Mi"
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+  scope: Namespaced
+  names:
+    plural: llmdeployments
+    singular: llmdeployment
+    kind: LLMDeployment
+    shortNames:
+      - llmd

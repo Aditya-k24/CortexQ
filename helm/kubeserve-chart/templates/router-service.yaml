@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-router
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: llm-router
+spec:
+  selector:
+    app: llm-router
+  ports:
+    - port: 80
+      targetPort: {{ .Values.router.port }}
+      protocol: TCP
+      name: http
+  type: ClusterIP

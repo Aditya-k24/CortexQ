@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeserve-operator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: kubeserve-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeserve-operator
+  template:
+    metadata:
+      labels:
+        app: kubeserve-operator
+    spec:
+      serviceAccountName: kubeserve-operator
+      containers:
+        - name: operator
+          image: {{ .Values.operator.image }}
+          imagePullPolicy: Always
+          env:
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: OPERATOR_IMAGE_PREFIX
+              value: "kubeserve"
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}

@@ -1,0 +1,14 @@
+{{- range .Values.llmDeployments }}
+apiVersion: kubeserve.io/v1alpha1
+kind: LLMDeployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace }}
+spec:
+  model: {{ .model }}
+  provider: {{ .provider }}
+  minReplicas: {{ .minReplicas }}
+  maxReplicas: {{ .maxReplicas }}
+  queueThreshold: {{ .queueThreshold }}
+---
+{{- end }}

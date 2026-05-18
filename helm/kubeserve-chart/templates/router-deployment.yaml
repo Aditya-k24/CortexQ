@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-router
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: llm-router
+spec:
+  replicas: {{ .Values.router.replicas }}
+  selector:
+    matchLabels:
+      app: llm-router
+  template:
+    metadata:
+      labels:
+        app: llm-router
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: router
+          image: {{ .Values.router.image }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: {{ .Values.router.port }}
+              name: http
+          env:
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: MODELS
+              value: {{ .Values.router.models | quote }}
+            - name: LB_STRATEGY
+              value: {{ .Values.router.lbStrategy | quote }}
+            - name: CB_FAILURE_THRESHOLD
+              value: {{ .Values.router.circuitBreaker.failureThreshold | quote }}
+            - name: CB_SUCCESS_THRESHOLD
+              value: {{ .Values.router.circuitBreaker.successThreshold | quote }}
+            - name: CB_TIMEOUT
+              value: {{ .Values.router.circuitBreaker.timeout | quote }}
+          {{- if .Values.redis.password }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.router.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.router.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.router.resources | nindent 12 }}

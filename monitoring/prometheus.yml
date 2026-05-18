@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'llm-router'
+    static_configs:
+      - targets: ['router:8080']
+    metrics_path: /metrics
+
+  - job_name: 'backend-claude'
+    static_configs:
+      - targets: ['backend-claude:8000']
+    metrics_path: /metrics
+
+  - job_name: 'backend-gpt4'
+    static_configs:
+      - targets: ['backend-gpt4:8000']
+    metrics_path: /metrics
+
+  - job_name: 'backend-gemini'
+    static_configs:
+      - targets: ['backend-gemini:8000']
+    metrics_path: /metrics

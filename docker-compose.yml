@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - kubeserve
+
+  router:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MODELS: "claude,gpt4,gemini"
+      LB_STRATEGY: round_robin
+      CB_FAILURE_THRESHOLD: "5"
+      CB_SUCCESS_THRESHOLD: "2"
+      CB_TIMEOUT: "30"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kubeserve
+
+  backend-claude:
+    build:
+      context: ./mock-backend
+      dockerfile: Dockerfile
+    environment:
+      MODEL_NAME: claude
+      PROVIDER: anthropic
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      QUEUE_NAME: claude-queue
+      MOCK_LATENCY_MIN: "0.05"
+      MOCK_LATENCY_MAX: "0.3"
+      MOCK_ERROR_RATE: "0.02"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kubeserve
+
+  backend-gpt4:
+    build:
+      context: ./mock-backend
+      dockerfile: Dockerfile
+    environment:
+      MODEL_NAME: gpt4
+      PROVIDER: openai
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      QUEUE_NAME: gpt4-queue
+      MOCK_LATENCY_MIN: "0.1"
+      MOCK_LATENCY_MAX: "0.5"
+      MOCK_ERROR_RATE: "0.01"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kubeserve
+
+  backend-gemini:
+    build:
+      context: ./mock-backend
+      dockerfile: Dockerfile
+    environment:
+      MODEL_NAME: gemini
+      PROVIDER: google
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      QUEUE_NAME: gemini-queue
+      MOCK_LATENCY_MIN: "0.08"
+      MOCK_LATENCY_MAX: "0.4"
+      MOCK_ERROR_RATE: "0.015"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kubeserve
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - kubeserve
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - kubeserve
+    profiles:
+      - monitoring
+
+networks:
+  kubeserve:
+    driver: bridge

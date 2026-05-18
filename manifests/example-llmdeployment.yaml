@@ -1,0 +1,35 @@
+apiVersion: kubeserve.io/v1alpha1
+kind: LLMDeployment
+metadata:
+  name: claude
+  namespace: kubeserve
+spec:
+  model: claude
+  provider: anthropic
+  minReplicas: 0       # scale-to-zero when idle
+  maxReplicas: 20
+  queueThreshold: 5   # scale up when queue > 5 items
+---
+apiVersion: kubeserve.io/v1alpha1
+kind: LLMDeployment
+metadata:
+  name: gpt4
+  namespace: kubeserve
+spec:
+  model: gpt4
+  provider: openai
+  minReplicas: 1
+  maxReplicas: 15
+  queueThreshold: 10
+---
+apiVersion: kubeserve.io/v1alpha1
+kind: LLMDeployment
+metadata:
+  name: gemini
+  namespace: kubeserve
+spec:
+  model: gemini
+  provider: google
+  minReplicas: 1
+  maxReplicas: 10
+  queueThreshold: 8

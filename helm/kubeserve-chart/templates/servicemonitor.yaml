@@ -1,0 +1,44 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-router-monitor
+  namespace: {{ .Values.monitoring.prometheusNamespace }}
+  labels:
+    team: monitoring
+    app: llm-router
+spec:
+  selector:
+    matchLabels:
+      app: llm-router
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics
+---
+{{- range .Values.llmDeployments }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-{{ .name }}-monitor
+  namespace: {{ $.Values.monitoring.prometheusNamespace }}
+  labels:
+    team: monitoring
+    app: llm-{{ .name }}
+spec:
+  selector:
+    matchLabels:
+      app: llm-{{ .name }}
+  namespaceSelector:
+    matchNames:
+      - {{ $.Values.namespace }}
+  endpoints:
+    - port: http-metrics
+      interval: 15s
+      path: /metrics
+---
+{{- end }}
+{{- end }}
