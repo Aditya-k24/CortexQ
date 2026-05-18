@@ -13,14 +13,14 @@ Kubernetes-native LLM inference autoscaling platform. Routes inference requests 
                         └───────────┬─────────────────────────────┘
                                     │ lpush
                      ┌──────────────▼──────────────────┐
-                     │              Redis               │
+                     │              Redis              │
                      │  claude-queue / gpt4-queue / …  │
                      └──┬──────────┬──────────┬────────┘
                         │          │          │ brpop
-               ┌────────▼─┐  ┌────▼────┐  ┌─▼───────┐
+               ┌────────▼──┐  ┌────▼────┐  ┌─▼───────┐
                │  Backend  │  │ Backend │  │ Backend │
                │  (claude) │  │ (gpt4)  │  │(gemini) │
-               └────────┬──┘  └────┬────┘  └──┬──────┘
+               └────────┬──┘  └────┬────┘  └───┬─────┘
                         │          │           │
                         └──────────┼───────────┘
                                    │ hset results
