@@ -19,7 +19,7 @@ spec:
       containers:
         - name: operator
           image: {{ .Values.operator.image }}
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           env:
             - name: REDIS_HOST
               value: {{ .Values.redis.host | quote }}

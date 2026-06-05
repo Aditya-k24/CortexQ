@@ -1,205 +1,102 @@
 # KubeServe
 
-Kubernetes-native LLM inference autoscaling platform. Routes inference requests across multiple model backends, autoscales pods based on Redis queue depth via KEDA, and exposes full OpenTelemetry/Prometheus/Grafana observability.
+Kubernetes-native LLM inference routing platform. Accepts inference requests, queues them in Redis per model, and autoscales backend pods based on queue depth using KEDA. A custom Kubernetes operator reconciles `LLMDeployment` CRDs into the full stack automatically.
 
-## Architecture
+## How it works
 
-```
-                        ┌─────────────────────────────────────────┐
-  HTTP /infer  ──────►  │           FastAPI Router                │
-                        │  • Round-robin / latency-aware LB       │
-                        │  • Circuit breaker per backend          │
-                        │  • Prometheus metrics + OTel traces     │
-                        └───────────┬─────────────────────────────┘
-                                    │ lpush
-                     ┌──────────────▼──────────────────┐
-                     │              Redis              │
-                     │  claude-queue / gpt4-queue / …  │
-                     └──┬──────────┬──────────┬────────┘
-                        │          │          │ brpop
-               ┌────────▼──┐  ┌────▼────┐  ┌─▼───────┐
-               │  Backend  │  │ Backend │  │ Backend │
-               │  (claude) │  │ (gpt4)  │  │(gemini) │
-               └────────┬──┘  └────┬────┘  └───┬─────┘
-                        │          │           │
-                        └──────────┼───────────┘
-                                   │ hset results
-                              Redis results hash
+  POST /infer
+      │
+      ▼
+  FastAPI Router  ──── circuit breaker + load balancer ────►  Redis queue (per model)
+      │                                                              │
+      │  returns job_id immediately                                  │ brpop
+      │                                                              ▼
+  GET /result/{id}  ◄──────────────────────────────────  Backend worker pod
+                              hset results hash              (simulates inference)
 
-  KEDA watches queue depth ──► scales Backend Deployments 0 → N
-  Kopf Operator watches LLMDeployment CRDs ──► creates Deployments + ScaledObjects
+  KEDA watches LLEN(queue) ──► scales backend pods 0 → N
+  Kopf operator watches LLMDeployment CRDs ──► creates Deployment + Service + ScaledObject
 ```
 
-## Components
+**Router** — FastAPI service that accepts `/infer`, selects a model via round-robin or latency-aware load balancing, checks a per-model circuit breaker, and pushes the job to Redis as a background task. Returns a `job_id` in under 5ms.
 
-| Component | Tech | Description |
-|-----------|------|-------------|
-| **Router** | FastAPI + Redis | Accepts `/infer`, routes to model queue, circuit-breaks on failure |
-| **Operator** | Python + Kopf | Watches `LLMDeployment` CRDs, reconciles Deployments/Services/ScaledObjects |
-| **Mock Backend** | FastAPI + Redis | Simulates LLM inference; polls queue, stores results |
-| **Autoscaling** | KEDA Redis trigger | Scales model pods 0→N based on queue depth |
-| **Observability** | OTel + Prometheus + Grafana | Traces, metrics, dashboards for latency/throughput/queue depth |
-| **GitOps** | Helm + ArgoCD | Single `helm install` deploys everything; ArgoCD auto-syncs on git push |
-| **Load Testing** | k6 | Smoke test + ramp-up load test to 500 VUs |
+**Backend** — Workers that block on `BRPOP` from their model's Redis queue, simulate inference, and write the result to a Redis hash. Scaled 0→N by KEDA.
 
-## Quick Start
+**Operator** — Kopf-based controller. Apply a single `LLMDeployment` CR and it creates the Deployment, Service, and KEDA ScaledObject for that model automatically.
 
-### Prerequisites
+**KEDA** — Watches Redis list length per model. Scales the backend deployment up when queue depth exceeds a threshold, back to zero when idle.
 
-- Docker + Docker Compose
-- Python 3.11+ (for running tests locally)
-- k6 (optional, for load testing)
-- kubectl + helm (optional, for Kubernetes deploy)
+## Stack
 
-### Local Development
+| Layer | Technology |
+|---|---|
+| Router | Python, FastAPI, redis-py async |
+| Operator | Python, Kopf, kubernetes-client |
+| Autoscaling | KEDA (Redis list scaler) |
+| Observability | Prometheus, Grafana, OpenTelemetry |
+| Packaging | Helm chart, ArgoCD |
+| Local dev | Docker Compose |
+| Load testing | k6 |
+
+## Quick start (local)
+
+Requires Docker.
 
 ```bash
-# Clone and enter the repo
-git clone https://github.com/Aditya-k24/KubeServe
+git clone https://github.com/Aditya-k24/CortexQ
 cd KubeServe
 
-# Start the full stack (Redis + Router + 3 model backends)
 docker compose up -d redis router backend-claude backend-gpt4 backend-gemini
+```
 
-# Check router health
+```bash
+# Health check
 curl http://localhost:8080/health
-# {"status":"healthy","redis":"connected"}
 
-# Send an inference request
+# Queue an inference job
 curl -s -X POST http://localhost:8080/infer \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "What is Kubernetes?", "model": "claude"}' | jq
-# {"status":"queued","job_id":"...","model":"claude","queue":"claude-queue"}
+  -d '{"prompt": "What is Kubernetes?", "model": "claude"}'
+# → {"status":"queued","job_id":"<uuid>","model":"claude","queue":"claude-queue"}
 
 # Poll for result
 curl http://localhost:8080/result/<job_id>
 
-# List models and circuit states
-curl http://localhost:8080/models | jq
-
-# Scrape Prometheus metrics
-curl http://localhost:8080/metrics
+# List models + circuit states
+curl http://localhost:8080/models
 ```
 
-### With Monitoring (Prometheus + Grafana)
+Add monitoring:
 
 ```bash
 docker compose --profile monitoring up -d
-# Prometheus: http://localhost:9090
-# Grafana:    http://localhost:3000  (anonymous access, no login)
+# Prometheus → http://localhost:9090
+# Grafana    → http://localhost:3000
 ```
 
-## API Reference
-
-### `POST /infer`
-Queue an inference request.
-
-**Request body:**
-```json
-{
-  "prompt": "string (required)",
-  "model": "claude | gpt4 | gemini  (optional, auto-selected if omitted)",
-  "params": {}
-}
-```
-
-**Response:**
-```json
-{
-  "status": "queued",
-  "job_id": "uuid",
-  "model": "claude",
-  "queue": "claude-queue"
-}
-```
-
-### `GET /result/{job_id}`
-Poll for job result. Returns `202 Pending` until the backend processes it.
-
-### `GET /health`
-Redis connectivity check.
-
-### `GET /metrics`
-Prometheus metrics endpoint. Key metrics:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `infer_requests_total` | Counter | Requests by model + status |
-| `infer_request_duration_seconds` | Histogram | End-to-end latency |
-| `llm_queue_length` | Gauge | Current Redis queue depth per model |
-| `circuit_breaker_state` | Gauge | 0=closed, 1=open, 2=half_open |
-
-### `GET /models`
-List registered models, circuit states, and EWMA latencies.
-
-## Testing
-
-```bash
-# Router unit tests (57 tests)
-cd router && pytest tests/ -v
-
-# Operator unit tests (31 tests)
-cd operator && pytest tests/ -v
-
-# Both via Makefile
-make test
-```
-
-Test coverage:
-- **Circuit breaker:** all state transitions (closed→open→half_open→closed, fallback routing, all-open 503)
-- **Load balancer:** round-robin cycling, latency-aware selection, model add/remove, EWMA convergence
-- **Router endpoints:** /infer routing, queue payload verification, metrics registration, result polling
-- **Operator:** Deployment/Service/ScaledObject manifest generation, create/update/delete handlers, conflict resolution
-
-## Kubernetes Deploy
-
-### Prerequisites
+## Kubernetes deploy
 
 ```bash
 # Install KEDA
 helm repo add kedacore https://kedacore.github.io/charts
 helm install keda kedacore/keda --namespace keda --create-namespace
 
-# Install Prometheus Operator (optional, for ServiceMonitors)
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm install kube-prometheus prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
-```
-
-### Deploy KubeServe
-
-```bash
-# Apply CRD first
+# Apply the CRD
 kubectl apply -f manifests/crd-llmdeployment.yaml
 
-# Deploy via Helm
+# Deploy
 helm install kubeserve helm/kubeserve-chart/ \
-  --namespace kubeserve \
-  --create-namespace \
-  --set redis.host=redis-master
+  --namespace kubeserve --create-namespace \
+  --set monitoring.enabled=false
 
-# Create LLM model deployments
+# Create model deployments
 kubectl apply -f manifests/example-llmdeployment.yaml
 
-# Watch pods scale up
-kubectl get pods -n kubeserve -w
+# Watch KEDA scale pods as queue fills
+kubectl get hpa -n kubeserve -w
 ```
 
-### GitOps with ArgoCD
-
-```bash
-# Install ArgoCD
-kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# Enable ArgoCD app in Helm values
-helm upgrade kubeserve helm/kubeserve-chart/ \
-  --set argocd.enabled=true \
-  --set argocd.repoURL=https://github.com/Aditya-k24/KubeServe
-```
-
-ArgoCD will auto-sync on every `git push` to `main`.
-
-## Custom Resource: LLMDeployment
+## LLMDeployment CRD
 
 ```yaml
 apiVersion: kubeserve.io/v1alpha1
@@ -208,90 +105,57 @@ metadata:
   name: claude
   namespace: kubeserve
 spec:
-  model: claude          # model name (used as Redis queue key)
-  provider: anthropic    # provider (determines container image mapping)
-  minReplicas: 0         # 0 = scale-to-zero when idle
-  maxReplicas: 20        # KEDA upper bound
-  queueThreshold: 5      # scale up when queue length exceeds this
+  model: claude
+  provider: anthropic
+  minReplicas: 0        # scale to zero when idle
+  maxReplicas: 20
+  queueThreshold: 5     # one pod per 5 queued jobs
 ```
 
-The Operator reconciles this into:
-- `Deployment` with Redis-polling backend container
-- `Service` (ClusterIP on port 80, metrics on 9090)
-- KEDA `ScaledObject` targeting the Deployment with Redis list trigger
+The operator reconciles this into a Deployment, ClusterIP Service, and KEDA ScaledObject. Deleting the CR garbage-collects all three via `ownerReferences`.
 
-## Load Testing
+## API
+
+| Endpoint | Description |
+|---|---|
+| `POST /infer` | Queue an inference job. Body: `{prompt, model?, params?}` |
+| `GET /result/{job_id}` | Poll for result. `202` while pending, `200` when complete |
+| `GET /models` | List models, circuit states, EWMA latencies |
+| `GET /health` | Redis connectivity check |
+| `GET /metrics` | Prometheus metrics |
+
+## Tests
 
 ```bash
-# Smoke test (20 iterations, 1 VU)
-k6 run --env ROUTER_URL=http://localhost:8080 k6/smoke-test.js
-
-# Full load test (ramps 10 → 50 → 100 → 500 VUs over ~7 minutes)
-k6 run --env ROUTER_URL=http://localhost:8080 k6/load-test.js
+make test          # 88 tests total
+cd router && pytest tests/ -v    # 57 tests
+cd operator && pytest tests/ -v  # 31 tests
 ```
 
-The load test verifies KEDA scale-up: as queue depth grows, KEDA triggers new pod replicas. Watch with:
-
-```bash
-kubectl get hpa -n kubeserve -w
-kubectl top pods -n kubeserve
-```
-
-## Project Structure
-
-```
-KubeServe/
-├── router/
-│   ├── main.py              FastAPI app (lifespan, endpoints, background enqueue)
-│   ├── circuit_breaker.py   3-state circuit breaker (closed/open/half_open)
-│   ├── load_balancer.py     Round-robin + EWMA latency-aware selection
-│   ├── metrics.py           Prometheus collector registry
-│   ├── Dockerfile
-│   └── tests/               57 pytest tests
-├── operator/
-│   ├── main.py              Kopf operator — CRD handlers + manifest builders
-│   ├── Dockerfile
-│   └── tests/               31 pytest tests
-├── mock-backend/
-│   ├── main.py              Async Redis worker + FastAPI health/metrics
-│   └── Dockerfile
-├── helm/kubeserve-chart/
-│   ├── Chart.yaml
-│   ├── values.yaml
-│   └── templates/           Namespace, CRD, RBAC, Operator, Router, ServiceMonitors, ArgoCD app
-├── manifests/               Raw YAML for direct kubectl apply
-├── k6/                      smoke-test.js, load-test.js
-├── monitoring/              Prometheus config, Grafana provisioning
-└── docker-compose.yml       Local dev stack
-```
+Covers circuit breaker state transitions, load balancer EWMA convergence, router endpoint behavior, and operator manifest generation.
 
 ## Configuration
 
-All router settings are environment variables:
+Router is configured via environment variables:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_HOST` | `localhost` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
+|---|---|---|
 | `MODELS` | `claude,gpt4,gemini` | Comma-separated model names |
 | `LB_STRATEGY` | `round_robin` | `round_robin` or `latency_aware` |
+| `REDIS_HOST` | `localhost` | Redis hostname |
 | `CB_FAILURE_THRESHOLD` | `5` | Failures before circuit opens |
-| `CB_SUCCESS_THRESHOLD` | `2` | Successes before circuit closes from half-open |
 | `CB_TIMEOUT` | `30` | Seconds before open circuit retries |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(disabled)_ | OTLP gRPC endpoint for traces |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP endpoint for traces (disabled if unset) |
 
-## Grafana Dashboard Queries
+## Project structure
 
-```promql
-# p95 request latency
-histogram_quantile(0.95, sum by (le, model) (rate(infer_request_duration_seconds_bucket[5m])))
-
-# Throughput (req/s per model)
-rate(infer_requests_total[1m])
-
-# Queue depth
-llm_queue_length
-
-# Circuit breaker state
-circuit_breaker_state
+```
+router/          FastAPI router, circuit breaker, load balancer, metrics
+operator/        Kopf operator — CRD handlers and manifest builders
+mock-backend/    Redis queue worker simulating LLM inference
+helm/            Helm chart (CRD, RBAC, operator, router, ServiceMonitors)
+manifests/       Raw YAML for kubectl apply
+k6/              Smoke test and load test scripts
+monitoring/      Prometheus config, Grafana provisioning
+docker-compose.yml
 ```

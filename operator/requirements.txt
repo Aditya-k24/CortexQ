@@ -1,2 +1,4 @@
 kopf==1.37.2
 kubernetes==31.0.0
+aiohttp==3.9.5
+cryptography==42.0.8

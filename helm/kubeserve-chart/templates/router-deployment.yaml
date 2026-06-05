@@ -22,7 +22,7 @@ spec:
       containers:
         - name: router
           image: {{ .Values.router.image }}
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: {{ .Values.router.port }}
               name: http

@@ -54,6 +54,7 @@ def build_deployment(name: str, namespace: str, spec: dict) -> dict:
                         {
                             "name": f"llm-{name}",
                             "image": image,
+                            "imagePullPolicy": "IfNotPresent",
                             "ports": [{"containerPort": 8000, "name": "http"}],
                             "env": [
                                 {"name": "MODEL_NAME", "value": model},
@@ -128,7 +129,7 @@ def build_scaled_object(name: str, namespace: str, spec: dict) -> dict:
                 {
                     "type": "redis",
                     "metadata": {
-                        "address": f"{REDIS_HOST}:{REDIS_PORT}",
+                        "address": f"{REDIS_HOST}.{namespace}.svc.cluster.local:{REDIS_PORT}",
                         "listName": f"{model}-queue",
                         "listLength": str(queue_threshold),
                     },
