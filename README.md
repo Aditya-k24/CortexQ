@@ -22,12 +22,12 @@ Queue inference requests across multiple LLM backends. Scale pods from zero base
   POST /infer
       │
       ▼
-┌─────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────┐
 │  FastAPI Router                                      │
 │  ├─ Round-robin or latency-aware load balancer       │
 │  ├─ Per-model circuit breaker (closed/open/half-open)│
 │  └─ Prometheus metrics + OpenTelemetry traces        │
-└──────────────────────────┬──────────────────────────┘
+└──────────────────────────┬───────────────────────────┘
                            │  lpush  (returns job_id in <5ms)
                            ▼
               ┌────────────────────────┐
@@ -35,7 +35,7 @@ Queue inference requests across multiple LLM backends. Scale pods from zero base
               │  claude-queue          │◄── KEDA watches LLEN
               │  gpt4-queue            │
               │  gemini-queue          │
-              └──┬─────────┬──────────┘
+              └──┬─────────┬───────────┘
           brpop  │         │  brpop
                  ▼         ▼
           [claude pod] [gpt4 pod]  ← scaled 0→N by KEDA
